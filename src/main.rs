@@ -1,22 +1,13 @@
 
-#![feature(plugin)]
-#![allow(unstable)]
+#![feature(collections, core, io, os, path, plugin)]
 
 extern crate regex;
 #[plugin] #[no_link] extern crate regex_macros;
 
 use std::borrow::ToOwned;
 use std::collections::BTreeMap;
-use std::default::Default;
-use std::io::process::Command;
+use std::old_io::process::Command;
 use std::os;
-
-#[derive(Debug, Default)]
-struct Export {
-    arm: bool,
-    x86: bool,
-    x64: bool,
-}
 
 fn exports(name: &str, arch: &str) -> Vec<String> {
     let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
@@ -34,30 +25,44 @@ fn exports(name: &str, arch: &str) -> Vec<String> {
     }).collect()
 }
 
+fn print_cfg(cfg: &[&str], c: bool) {
+    if c { print!("#![cfg(") } else { print!("// #[cfg(") }
+    if cfg.len() > 1 {
+        print!("any(");
+        print!("target_arch = \"{}\"", cfg[0]);
+        for n in cfg[1..].iter() { print!(", target_arch = \"{}\"", n) }
+        print!(")");
+    } else {
+        print!("target_arch = \"{}\"", cfg[0]);
+    }
+    println!(")]");
+}
+
 fn main() {
     let args = os::args();
     let mut map = BTreeMap::new();
+    let mut all = Vec::new();
     let name = &*args[1];
-    for r in exports(name, "x86").into_iter() {
-        map.entry(r).get().unwrap_or_else(|x| x.insert(<Export as Default>::default())).x86 = true;
+    {
+        let mut import = |a1: &str, a2: &'static str| {
+            let e = exports(name, a1);
+            if e.is_empty() { return }
+            all.push(a2);
+            for r in e.into_iter() {
+                map.entry(r).get().unwrap_or_else(|x| x.insert(Vec::new())).push(a2);
+            }
+        };
+        import("x86", "x86");
+        import("x64", "x86_64");
+        import("arm", "arm");
     }
-    for r in exports(name, "x64").into_iter() {
-        map.entry(r).get().unwrap_or_else(|x| x.insert(<Export as Default>::default())).x64 = true;
+    if all.is_empty() {
+        println!("No exports found!");
+        return;
     }
-    for r in exports(name, "arm").into_iter() {
-        map.entry(r).get().unwrap_or_else(|x| x.insert(<Export as Default>::default())).arm = true;
-    }
+    if all.len() < 3 { print_cfg(&*all, true) }
     for (k, v) in map.iter() {
-        match (v.arm, v.x86, v.x64) {
-            (true, true, true) => (),
-            (true, true, false) => println!("// #[cfg(any(target_arch = \"arm\", target_arch = \"x86\"))]"),
-            (true, false, true) => println!("// #[cfg(any(target_arch = \"arm\", target_arch = \"x86_64\"))]"),
-            (true, false, false) => println!("// #[cfg(target_arch = \"arm\")]"),
-            (false, true, true) => println!("// #[cfg(any(target_arch = \"x86\", target_arch = \"x86_64\"))]"),
-            (false, true, false) => println!("// #[cfg(target_arch = \"x86\")]"),
-            (false, false, true) => println!("// #[cfg(target_arch = \"x86_64\")]"),
-            (false, false, false) => unreachable!(),
-        }
+        if v.len() < all.len() { print_cfg(&**v, false) }
         println!("// pub fn {}();", k);
     }
 }
