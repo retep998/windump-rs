@@ -2,9 +2,15 @@
 name = "exports-rs"
 version = "0.0.1"
 dependencies = [
+ "collect 0.0.20 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 0.1.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex_macros 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "collect"
+version = "0.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "regex"
