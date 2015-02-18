@@ -191,12 +191,12 @@ fn main() {
         writeln!(&mut file, "{}", match link {
             Linkage::Cdecl => "extern \"cdecl\" {",
             Linkage::Fastcall => "extern \"fastcall\" {",
-            Linkage::Stdcall => "extern \"stdcall\" {",
+            Linkage::Stdcall => "extern \"system\" {",
             Linkage::Static => "extern {",
         }).unwrap();
         for name in names {
             if link == Linkage::Static {
-                writeln!(&mut file, "    // static {};", name).unwrap();
+                writeln!(&mut file, "    // pub static {};", name).unwrap();
             } else {
                 writeln!(&mut file, "    // pub fn {}();", name).unwrap();
             }
