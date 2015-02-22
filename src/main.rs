@@ -1,5 +1,5 @@
 
-#![feature(collections, core, io, os, path, plugin)]
+#![feature(collections, core, env, old_io, old_path, plugin)]
 #![plugin(regex_macros)]
 
 extern crate collect;
@@ -8,10 +8,10 @@ extern crate regex;
 use collect::enum_set::{CLike, EnumSet};
 use std::borrow::ToOwned;
 use std::collections::BTreeMap;
+use std::env;
 use std::mem::transmute;
 use std::old_io::fs::{File, PathExtensions};
 use std::old_io::process::Command;
-use std::os;
 
 #[derive(Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Linkage {
@@ -156,12 +156,11 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
     }
 }
 fn main() {
-    let args = os::args();
+    let name = env::args().nth(1).unwrap();
     let mut all = Vec::new();
-    let name = &args[1];
-    all.append(&mut get_stuff(name, Arch::X86));
-    all.append(&mut get_stuff(name, Arch::X64));
-    all.append(&mut get_stuff(name, Arch::Arm));
+    all.append(&mut get_stuff(&name, Arch::X86));
+    all.append(&mut get_stuff(&name, Arch::X64));
+    all.append(&mut get_stuff(&name, Arch::Arm));
     if all.is_empty() {
         panic!("Nothing found at all!")
     }
