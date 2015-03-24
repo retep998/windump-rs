@@ -1,26 +1,28 @@
 
-#![feature(collections, core, env, old_io, old_path, plugin)]
+#![feature(collections, path_ext, plugin)]
 #![plugin(regex_macros)]
 
-extern crate collect;
+extern crate enum_set;
 extern crate regex;
 
-use collect::enum_set::{CLike, EnumSet};
-use std::borrow::ToOwned;
-use std::collections::BTreeMap;
+use enum_set::{CLike, EnumSet};
+use std::borrow::{ToOwned};
+use std::collections::{BTreeMap};
 use std::env;
-use std::mem::transmute;
-use std::old_io::fs::{File, PathExtensions};
-use std::old_io::process::Command;
+use std::io::{Write};
+use std::mem::{transmute};
+use std::fs::{File, PathExt};
+use std::path::{Path, PathBuf};
+use std::process::{Command};
 
-#[derive(Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Linkage {
     Cdecl,
     Fastcall,
     Stdcall,
     Static,
 }
-#[derive(Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u32)]
 enum Arch {
     X86,
@@ -36,7 +38,7 @@ impl CLike for Arch {
     }
 }
 impl Arch {
-    fn make_path(self, name: &str) -> Path {
+    fn make_path(self, name: &str) -> PathBuf {
         let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\8.1\Lib\winv6.3\um");
         let arch = match self {
             Arch::X86 => "x86",
@@ -69,7 +71,7 @@ fn get_stuff(name: &str, arch: Arch) -> Vec<Export> {
 fn symbols(plib: &Path, arch: Arch) -> Vec<Export> {
     let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
     let output = Command::new(&pdumpbin).arg("/SYMBOLS").arg(plib).output().unwrap();
-    let stdout = String::from_utf8(output.output).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
     let reg = if arch == Arch::X86 {
         regex!("^.* External +\\| _(.*)$")
     } else {
@@ -91,7 +93,7 @@ fn symbols(plib: &Path, arch: Arch) -> Vec<Export> {
 fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
     let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
     let output = Command::new(&pdumpbin).arg("/EXPORTS").arg(plib).output().unwrap();
-    let stdout = String::from_utf8(output.output).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
     let mut lines = stdout.lines_any();
     loop {
         match lines.next() {
@@ -137,7 +139,7 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
                         arch: arch,
                     });
                 } else {
-                    println!("Unknown: {:?}", line);
+                    println!("Unknown {:?}: {:?}", arch, line);
                 }
             } else {
                 if let Some(cap) = system.captures(line) {
@@ -148,7 +150,7 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
                         arch: arch,
                     });
                 } else {
-                    println!("Unknown: {:?}", line);
+                    println!("Unknown {:?}: {:?}", arch, line);
                 }
             },
             None => panic!("Unexpected line!"),
@@ -166,16 +168,14 @@ fn main() {
     }
     let mut combined: BTreeMap<_, EnumSet<_>> = BTreeMap::new();
     for Export { name, link, arch } in all {
-        combined.entry((name, link)).get()
-            .unwrap_or_else(|x| x.insert(EnumSet::new())).insert(arch);
+        combined.entry((name, link)).or_insert(EnumSet::new()).insert(arch);
     }
     let mut results: BTreeMap<_, Vec<_>> = BTreeMap::new();
     for ((name, link), archs) in combined {
         let archs: Vec<_> = archs.iter().collect();
-        results.entry((link, archs)).get()
-            .unwrap_or_else(|x| x.insert(Vec::new())).push(name);
+        results.entry((link, archs)).or_insert(Vec::new()).push(name);
     }
-    let mut file = File::create(&Path::new(format!("work/{}.rs", name)));
+    let mut file = File::create(&Path::new(&format!("work/{}.rs", name))).unwrap();
     for ((link, archs), names) in results {
         if archs.len() > 1 {
             write!(&mut file, "#[cfg(any(").unwrap();
