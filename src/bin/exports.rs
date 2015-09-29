@@ -1,14 +1,14 @@
 
-#![feature(collections, path_ext, plugin)]
-#![plugin(regex_macros)]
+#![feature(path_ext)]
 
 extern crate enum_set;
 extern crate regex;
 
 use enum_set::{CLike, EnumSet};
+use regex::{Regex};
 use std::borrow::{ToOwned};
 use std::collections::{BTreeMap};
-use std::env;
+use std::fs::{read_dir};
 use std::io::{Write};
 use std::mem::{transmute};
 use std::fs::{File, PathExt};
@@ -39,7 +39,7 @@ impl CLike for Arch {
 }
 impl Arch {
     fn make_path(self, name: &str) -> PathBuf {
-        let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\8.1\Lib\winv6.3\um");
+        let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10240.0\um");
         let arch = match self {
             Arch::X86 => "x86",
             Arch::X64 => "x64",
@@ -73,11 +73,11 @@ fn symbols(plib: &Path, arch: Arch) -> Vec<Export> {
     let output = Command::new(&pdumpbin).arg("/SYMBOLS").arg(plib).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
     let reg = if arch == Arch::X86 {
-        regex!("^.* External +\\| _(.*)$")
+        Regex::new("^.* External +\\| _([a-zA-Z0-9_]+)$").unwrap()
     } else {
-        regex!("^.* External +\\| (.*)$")
+        Regex::new("^.* External +\\| ([a-zA-Z0-9_]+)$").unwrap()
     };
-    stdout.lines_any().filter_map(|line| {
+    stdout.lines().filter_map(|line| {
         reg.captures(line).map(|cap| {
             let name = cap.at(1).unwrap().to_owned();
             Export {
@@ -94,7 +94,7 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
     let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
     let output = Command::new(&pdumpbin).arg("/EXPORTS").arg(plib).output().unwrap();
     let stdout = String::from_utf8(output.stdout).unwrap();
-    let mut lines = stdout.lines_any();
+    let mut lines = stdout.lines();
     loop {
         match lines.next() {
             Some("     Exports") => break,
@@ -109,10 +109,10 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
     assert!(lines.next() == Some("       ordinal    name"));
     assert!(lines.next() == Some(""));
     let mut exports = Vec::new();
-    let system = regex!("^[ 0-9]{18}([a-zA-Z0-9_]+)$");
-    let stdcall = regex!("^[ 0-9]{18}_([a-zA-Z0-9_]+)@[0-9]+$");
-    let fastcall = regex!("^[ 0-9]{18}@([a-zA-Z0-9_]+)@[0-9]+$");
-    let cdecl = regex!("^[ 0-9]{18}_([a-zA-Z0-9_]+)+$");
+    let system = Regex::new("^[ 0-9]{18}([a-zA-Z0-9_]+)$").unwrap();
+    let stdcall = Regex::new("^[ 0-9]{18}_([a-zA-Z0-9_]+)@[0-9]+$").unwrap();
+    let fastcall = Regex::new("^[ 0-9]{18}@([a-zA-Z0-9_]+)@[0-9]+$").unwrap();
+    let cdecl = Regex::new("^[ 0-9]{18}_([a-zA-Z0-9_]+)+$").unwrap();
     loop {
         match lines.next() {
             Some("") => return exports,
@@ -157,14 +157,15 @@ fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
         }
     }
 }
-fn main() {
-    let name = env::args().nth(1).unwrap();
+fn export(name: &str) {
+    println!("Dumping {:?}", name);
     let mut all = Vec::new();
-    all.append(&mut get_stuff(&name, Arch::X86));
-    all.append(&mut get_stuff(&name, Arch::X64));
-    all.append(&mut get_stuff(&name, Arch::Arm));
+    all.append(&mut get_stuff(name, Arch::X86));
+    all.append(&mut get_stuff(name, Arch::X64));
+    all.append(&mut get_stuff(name, Arch::Arm));
     if all.is_empty() {
-        panic!("Nothing found at all!")
+        println!("Seriously nothing?");
+        return
     }
     let mut combined: BTreeMap<_, EnumSet<_>> = BTreeMap::new();
     for Export { name, link, arch } in all {
@@ -175,7 +176,7 @@ fn main() {
         let archs: Vec<_> = archs.iter().collect();
         results.entry((link, archs)).or_insert(Vec::new()).push(name);
     }
-    let mut file = File::create(&Path::new(&format!("work/{}.rs", name))).unwrap();
+    let mut file = File::create(&Path::new("work").join(name).with_extension("rs")).unwrap();
     for ((link, archs), names) in results {
         if archs.len() > 1 {
             write!(&mut file, "#[cfg(any(").unwrap();
@@ -202,4 +203,25 @@ fn main() {
         }
         writeln!(&mut file, "}}").unwrap();
     }
+}
+fn do_exports() {
+    let path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10240.0\um");
+    let mut names: Vec<_> = ["arm", "x86", "x64"].iter().flat_map(|arch|
+        read_dir(path.join(arch)).unwrap().filter_map(|p|
+            p.ok().and_then(|p|
+                if let Ok(meta) = p.metadata() {
+                    let path: PathBuf = p.path().to_str().unwrap().to_lowercase().into();
+                    if meta.is_file() && path.extension() == Some("lib".as_ref()) {
+                        path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_owned())
+                    } else { None }
+                } else { None }
+            )
+        )
+    ).collect();
+    names.sort();
+    names.dedup();
+    for name in names { export(&name) }
+}
+fn main() {
+    do_exports();
 }
