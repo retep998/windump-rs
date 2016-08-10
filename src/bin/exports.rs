@@ -1,6 +1,4 @@
 
-#![feature(path_ext)]
-
 extern crate enum_set;
 extern crate regex;
 
@@ -11,7 +9,7 @@ use std::collections::{BTreeMap};
 use std::fs::{read_dir};
 use std::io::{Write};
 use std::mem::{transmute};
-use std::fs::{File, PathExt};
+use std::fs::{File};
 use std::path::{Path, PathBuf};
 use std::process::{Command};
 
@@ -39,7 +37,7 @@ impl CLike for Arch {
 }
 impl Arch {
     fn make_path(self, name: &str) -> PathBuf {
-        let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10240.0\um");
+        let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um");
         let arch = match self {
             Arch::X86 => "x86",
             Arch::X64 => "x64",
@@ -205,7 +203,7 @@ fn export(name: &str) {
     }
 }
 fn do_exports() {
-    let path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10240.0\um");
+    let path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um");
     let mut names: Vec<_> = ["arm", "x86", "x64"].iter().flat_map(|arch|
         read_dir(path.join(arch)).unwrap().filter_map(|p|
             p.ok().and_then(|p|

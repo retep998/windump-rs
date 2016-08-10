@@ -10,7 +10,7 @@ use std::io::{Read};
 use std::path::{Path};
 
 fn main() {
-    let base = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0");
+    let base = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Include\10.0.10586.0");
     let reg1 = Regex::new(r#"^#include\s+<(.*)>"#).unwrap();
     let reg2 = Regex::new(r#"^#include\s+"(.*)""#).unwrap();
     let mut data: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
