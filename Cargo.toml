@@ -7,3 +7,7 @@ authors = ["Peter Atashian <retep998@gmail.com>"]
 [dependencies]
 regex = "*"
 enum-set = "*"
+walkdir = "0.1.6"
+
+[profile.release]
+debug = true

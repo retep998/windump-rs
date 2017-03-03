@@ -1,225 +1,195 @@
 
-extern crate enum_set;
 extern crate regex;
 
-use enum_set::{CLike, EnumSet};
 use regex::{Regex};
-use std::borrow::{ToOwned};
-use std::collections::{BTreeMap};
-use std::fs::{read_dir};
-use std::io::{Write};
-use std::mem::{transmute};
+use std::collections::{HashMap};
+use std::env::args;
 use std::fs::{File};
-use std::path::{Path, PathBuf};
+use std::io::{BufWriter, Write};
+use std::path::{Path};
 use std::process::{Command};
+use std::str::FromStr;
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum Linkage {
-    Cdecl,
-    Fastcall,
-    Stdcall,
-    Static,
-}
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[repr(u32)]
-enum Arch {
-    X86,
+//Fields:
+//DLL name = name of DLL
+//Hint = ordinal hint
+//Library = name of import library
+//Machine = 8664 (x64)|14C (x86)
+//Name = name of the symbol in the DLL itself
+//Name type = undecorate|name|ordinal|no prefix
+//Ordinal = ordinal of symbol in dll for exports with no name
+//SizeOfData = size of data in bytes
+//Symbol name = possibly mangled symbol that the code links against
+//TimeDateStamp = some sort of time stamp
+//Type = code|data|const
+//Version = 0
+
+pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe";
+pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.14393.0\um";
+pub const WINBASE: &'static str = r"C:\Users\Peter\Code\winapi-rs";
+pub const DLLTOOL64: &'static str = r"C:\msys64\mingw64\bin\dlltool.exe";
+pub const DLLTOOL32: &'static str = r"C:\msys64\mingw32\bin\dlltool.exe";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Machine {
     X64,
-    Arm,
+    X86,
 }
-impl CLike for Arch {
-    fn to_u32(&self) -> u32 {
-        *self as u32
-    }
-    unsafe fn from_u32(v: u32) -> Arch {
-        transmute(v)
-    }
-}
-impl Arch {
-    fn make_path(self, name: &str) -> PathBuf {
-        let pbase = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um");
-        let arch = match self {
-            Arch::X86 => "x86",
-            Arch::X64 => "x64",
-            Arch::Arm => "arm",
-        };
-        pbase.join(arch).join(name).with_extension("lib")
-    }
-    fn cfg_name(self) -> &'static str {
+impl Machine {
+    fn msvc(&self) -> &'static str {
         match self {
-            Arch::X86 => "x86",
-            Arch::X64 => "x86_64",
-            Arch::Arm => "arm",
+            &Machine::X64 => "x64",
+            &Machine::X86 => "x86",
+        }
+    }
+    fn rust(&self) -> &'static str {
+        match self {
+            &Machine::X64 => "x86_64",
+            &Machine::X86 => "i686",
         }
     }
 }
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct Export {
-    name: String,
-    link: Linkage,
-    arch: Arch,
-}
-fn get_stuff(name: &str, arch: Arch) -> Vec<Export> {
-    let plib = arch.make_path(name);
-    if !plib.is_file() { return Vec::new() }
-    let mut exports = exports(&plib, arch);
-    exports.append(&mut symbols(&plib, arch));
-    exports
-}
-fn symbols(plib: &Path, arch: Arch) -> Vec<Export> {
-    let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
-    let output = Command::new(&pdumpbin).arg("/SYMBOLS").arg(plib).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let reg = if arch == Arch::X86 {
-        Regex::new("^.* External +\\| _([a-zA-Z0-9_]+)$").unwrap()
-    } else {
-        Regex::new("^.* External +\\| ([a-zA-Z0-9_]+)$").unwrap()
-    };
-    stdout.lines().filter_map(|line| {
-        reg.captures(line).map(|cap| {
-            let name = cap.at(1).unwrap().to_owned();
-            Export {
-                name: name,
-                link: Linkage::Static,
-                arch: arch,
-            }
+impl FromStr for Machine {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Machine, ()> {
+        Ok(match s {
+            "8664 (x64)" => Machine::X64,
+            "14C (x86)" => Machine::X86,
+            x => panic!("Unknown Machine of {:?}", x),
         })
-    }).filter(|thing| {
-        !thing.name.contains("IMPORT_DESCRIPTOR") && !thing.name.contains("NULL_THUNK_DATA")
-    }).collect()
+    }
 }
-fn exports(plib: &Path, arch: Arch) -> Vec<Export> {
-    let pdumpbin = Path::new(r"C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\dumpbin.exe");
-    let output = Command::new(&pdumpbin).arg("/EXPORTS").arg(plib).output().unwrap();
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let mut lines = stdout.lines();
-    loop {
-        match lines.next() {
-            Some("     Exports") => break,
-            Some(_) => (),
-            None => {
-                println!("No exports found!");
-                return Vec::new()
+#[derive(Debug)]
+enum NameType {
+    Undecorate,
+    Name,
+    Ordinal,
+    NoPrefix,
+}
+impl FromStr for NameType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<NameType, ()> {
+        Ok(match s {
+            "undecorate" => NameType::Undecorate,
+            "name" => NameType::Name,
+            "ordinal" => NameType::Ordinal,
+            "no prefix" => NameType::NoPrefix,
+            x => panic!("Unknown Name type of {:?}", x),
+        })
+    }
+}
+#[derive(Debug, Eq, PartialEq)]
+enum Type {
+    Code,
+    Data,
+    Const,
+}
+impl FromStr for Type {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Type, ()> {
+        Ok(match s {
+            "code" => Type::Code,
+            "data" => Type::Data,
+            "const" => Type::Const,
+            x => panic!("Unknown Type of {:?}", x),
+        })
+    }
+}
+#[derive(Debug)]
+struct Export {
+    dll: String,
+    hint: Option<u32>,
+    machine: Machine,
+    name: Option<String>,
+    name_type: NameType,
+    ordinal: Option<u32>,
+    size_of_data: u32,
+    symbol_name: String,
+    time_date_stamp: String,
+    data_type: Type,
+}
+
+fn export(name: &str, arch: Machine) {
+    println!("Working on {}", name);
+    let plibmsvc = Path::new(SDKBASE).join(arch.msvc()).join(format!("{}.lib", name));
+    let pdef = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("{}.def", name));
+    let plibgnu = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("lib{}.a", name));
+    let reg = Regex::new("^  ([a-zA-Z ]*?) *: (.*)$").unwrap();
+    let cin = Command::new(DUMPBIN).arg("/HEADERS").arg(&plibmsvc).output().unwrap();
+    let input = String::from_utf8_lossy(&cin.stdout);
+    let mut fout = BufWriter::new(File::create(&pdef).unwrap());
+    let mut next: HashMap<String, String> = HashMap::new();
+    let mut exports: Vec<Export> = Vec::new();
+    for line in input.lines() {
+        if let Some(cap) = reg.captures(line) {
+            let key = cap.at(1).unwrap();
+            let val = cap.at(2).unwrap();
+            next.insert(key.into(), val.into());
+        } else if !next.is_empty() {
+            //println!("{:?}", next);
+            let version: u32 = next.remove("Version").unwrap().parse().unwrap();
+            assert!(version == 0);
+            let export = Export {
+                dll: next.remove("DLL name").unwrap(),
+                hint: next.remove("Hint").map(|x| x.parse().unwrap()),
+                machine: next.remove("Machine").unwrap().parse().unwrap(),
+                name: next.remove("Name"),
+                name_type: next.remove("Name type").unwrap().parse().unwrap(),
+                ordinal: next.remove("Ordinal").map(|x| x.parse().unwrap()),
+                size_of_data: u32::from_str_radix(&next.remove("SizeOfData").unwrap(), 16).unwrap(),
+                symbol_name: next.remove("Symbol name").unwrap(),
+                time_date_stamp: next.remove("TimeDateStamp").unwrap(),
+                data_type: next.remove("Type").unwrap().parse().unwrap(),
+            };
+            assert!(next.is_empty());
+            exports.push(export);
+        }
+    }
+    exports.sort_by(|a, b| (&a.dll, &a.name).cmp(&(&b.dll, &b.name)));
+    let mut last_dll = String::new();
+    for export in exports {
+        if export.data_type != Type::Code {
+            println!("Skipping non-code {:?}", export);
+            continue
+        }
+        if export.dll != last_dll {
+            writeln!(&mut fout, "LIBRARY {}", export.dll).unwrap();
+            last_dll = export.dll.clone();
+            writeln!(&mut fout, "EXPORTS").unwrap();
+        }
+        if export.symbol_name.contains("@@") {
+            println!("Skipping C++ {:?}", export.name);
+            continue
+        }
+        match export.name_type {
+            NameType::Undecorate | NameType::NoPrefix => {
+                let symbol = sanitize(&export.symbol_name, arch);
+                writeln!(&mut fout, "{}", symbol).unwrap();
+            },
+            NameType::Name => {
+                writeln!(&mut fout, "{}", export.symbol_name).unwrap();
+            },
+            NameType::Ordinal => {
+                let symbol = sanitize(&export.symbol_name, arch);
+                writeln!(&mut fout, "{} @{}", symbol, export.ordinal.unwrap()).unwrap();
             },
         }
     }
-    assert!(lines.next() == Some(""));
-    assert!(lines.next() == Some("       ordinal    name"));
-    assert!(lines.next() == Some(""));
-    let mut exports = Vec::new();
-    let system = Regex::new("^[ 0-9]{18}([a-zA-Z0-9_]+)$").unwrap();
-    let stdcall = Regex::new("^[ 0-9]{18}_([a-zA-Z0-9_]+)@[0-9]+$").unwrap();
-    let fastcall = Regex::new("^[ 0-9]{18}@([a-zA-Z0-9_]+)@[0-9]+$").unwrap();
-    let cdecl = Regex::new("^[ 0-9]{18}_([a-zA-Z0-9_]+)+$").unwrap();
-    loop {
-        match lines.next() {
-            Some("") => return exports,
-            Some(line) => if arch == Arch::X86 {
-                if let Some(cap) = stdcall.captures(line) {
-                    let name = cap.at(1).unwrap().to_owned();
-                    exports.push(Export {
-                        name: name,
-                        link: Linkage::Stdcall,
-                        arch: arch,
-                    });
-                } else if let Some(cap) = fastcall.captures(line) {
-                    let name = cap.at(1).unwrap().to_owned();
-                    exports.push(Export {
-                        name: name,
-                        link: Linkage::Fastcall,
-                        arch: arch,
-                    });
-                } else if let Some(cap) = cdecl.captures(line) {
-                    let name = cap.at(1).unwrap().to_owned();
-                    exports.push(Export {
-                        name: name,
-                        link: Linkage::Cdecl,
-                        arch: arch,
-                    });
-                } else {
-                    println!("Unknown {:?}: {:?}", arch, line);
-                }
-            } else {
-                if let Some(cap) = system.captures(line) {
-                    let name = cap.at(1).unwrap().to_owned();
-                    exports.push(Export {
-                        name: name,
-                        link: Linkage::Stdcall,
-                        arch: arch,
-                    });
-                } else {
-                    println!("Unknown {:?}: {:?}", arch, line);
-                }
-            },
-            None => panic!("Unexpected line!"),
-        }
-    }
+    drop(fout);
+    let dlltool = match arch {
+        Machine::X64 => DLLTOOL64,
+        Machine::X86 => DLLTOOL32,
+    };
+    Command::new(dlltool).arg("-d").arg(&pdef).arg("-l").arg(&plibgnu).arg("-k").output().unwrap();
 }
-fn export(name: &str) {
-    println!("Dumping {:?}", name);
-    let mut all = Vec::new();
-    all.append(&mut get_stuff(name, Arch::X86));
-    all.append(&mut get_stuff(name, Arch::X64));
-    all.append(&mut get_stuff(name, Arch::Arm));
-    if all.is_empty() {
-        println!("Seriously nothing?");
-        return
-    }
-    let mut combined: BTreeMap<_, EnumSet<_>> = BTreeMap::new();
-    for Export { name, link, arch } in all {
-        combined.entry((name, link)).or_insert(EnumSet::new()).insert(arch);
-    }
-    let mut results: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    for ((name, link), archs) in combined {
-        let archs: Vec<_> = archs.iter().collect();
-        results.entry((link, archs)).or_insert(Vec::new()).push(name);
-    }
-    let mut file = File::create(&Path::new("work").join(name).with_extension("rs")).unwrap();
-    for ((link, archs), names) in results {
-        if archs.len() > 1 {
-            write!(&mut file, "#[cfg(any(").unwrap();
-            write!(&mut file, "target_arch = \"{}\"", archs[0].cfg_name()).unwrap();
-            for arch in &archs[1..] {
-                write!(&mut file, ", target_arch = \"{}\"", arch.cfg_name()).unwrap();
-            }
-            writeln!(&mut file, "))]").unwrap();
-        } else if archs.len() == 1 {
-            writeln!(&mut file, "#[cfg(target_arch = \"{}\")]", archs[0].cfg_name()).unwrap();
-        } else { unreachable!() }
-        writeln!(&mut file, "{}", match link {
-            Linkage::Cdecl => "extern \"cdecl\" {",
-            Linkage::Fastcall => "extern \"fastcall\" {",
-            Linkage::Stdcall => "extern \"system\" {",
-            Linkage::Static => "extern {",
-        }).unwrap();
-        for name in names {
-            if link == Linkage::Static {
-                writeln!(&mut file, "    // pub static {};", name).unwrap();
-            } else {
-                writeln!(&mut file, "    // pub fn {}();", name).unwrap();
-            }
-        }
-        writeln!(&mut file, "}}").unwrap();
-    }
-}
-fn do_exports() {
-    let path = Path::new(r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um");
-    let mut names: Vec<_> = ["arm", "x86", "x64"].iter().flat_map(|arch|
-        read_dir(path.join(arch)).unwrap().filter_map(|p|
-            p.ok().and_then(|p|
-                if let Ok(meta) = p.metadata() {
-                    let path: PathBuf = p.path().to_str().unwrap().to_lowercase().into();
-                    if meta.is_file() && path.extension() == Some("lib".as_ref()) {
-                        path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_owned())
-                    } else { None }
-                } else { None }
-            )
-        )
-    ).collect();
-    names.sort();
-    names.dedup();
-    for name in names { export(&name) }
+fn sanitize(symbol: &str, arch: Machine) -> &str {
+    if arch != Machine::X86 { symbol }
+    else if &symbol[0..1] == "_" { &symbol[1..] }
+    else { symbol }
 }
 fn main() {
-    do_exports();
+    for arg in args().skip(1) {
+        export(&arg, Machine::X64);
+        export(&arg, Machine::X86);
+    }
 }
