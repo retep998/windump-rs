@@ -128,7 +128,7 @@ fn export(name: &str, arch: Machine) {
         } else if !next.is_empty() {
             //println!("{:?}", next);
             let version: u32 = next.remove("Version").unwrap().parse().unwrap();
-            assert!(version == 0);
+            assert_eq!(version, 0);
             let export = Export {
                 dll: next.remove("DLL name").unwrap(),
                 hint: next.remove("Hint").map(|x| x.parse().unwrap()),
@@ -158,7 +158,7 @@ fn export(name: &str, arch: Machine) {
             writeln!(&mut fout, "EXPORTS").unwrap();
         }
         if export.symbol_name.contains("@@") {
-            println!("Skipping C++ {:?}", export.name);
+            println!("Skipping C++ {:?}", export.symbol_name);
             continue
         }
         match export.name_type {
