@@ -2,7 +2,7 @@
 extern crate regex;
 
 use regex::{Regex};
-use std::collections::{HashMap};
+use std::collections::{HashMap, HashSet};
 use std::env::args;
 use std::fs::{File};
 use std::io::{BufWriter, Write};
@@ -114,10 +114,13 @@ fn export(name: &str, arch: Machine) {
     let plibmsvc = Path::new(SDKBASE).join(arch.msvc()).join(format!("{}.lib", name));
     let pdef = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("{}.def", name));
     let plibgnu = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("lib{}.a", name));
-    let reg = Regex::new("^  ([a-zA-Z ]*?) *: (.*)$").unwrap();
+    if !plibmsvc.exists() {
+        println!("Library does not exist!");
+        return;
+    }
+    let reg = Regex::new("^  ([a-zA-Z][a-zA-Z ]*?) *: (.*)$").unwrap();
     let cin = Command::new(DUMPBIN).arg("/HEADERS").arg(&plibmsvc).output().unwrap();
     let input = String::from_utf8_lossy(&cin.stdout);
-    let mut fout = BufWriter::new(File::create(&pdef).unwrap());
     let mut next: HashMap<String, String> = HashMap::new();
     let mut exports: Vec<Export> = Vec::new();
     for line in input.lines() {
@@ -126,7 +129,6 @@ fn export(name: &str, arch: Machine) {
             let val = cap.at(2).unwrap();
             next.insert(key.into(), val.into());
         } else if !next.is_empty() {
-            //println!("{:?}", next);
             let version: u32 = next.remove("Version").unwrap().parse().unwrap();
             assert_eq!(version, 0);
             let export = Export {
@@ -146,6 +148,17 @@ fn export(name: &str, arch: Machine) {
         }
     }
     exports.sort_by(|a, b| (&a.dll, &a.name).cmp(&(&b.dll, &b.name)));
+    {
+        let dlls = exports.iter().map(|x| &*x.dll).collect::<HashSet<_>>();
+        if dlls.len() == 0 {
+            println!("No DLL imports found!");
+            return;
+        } else if dlls.len() > 1 {
+            println!("Library has imports from multiple DLLs!");
+            return;
+        }
+    }
+    let mut fout = BufWriter::new(File::create(&pdef).unwrap());
     let mut last_dll = String::new();
     for export in exports {
         if export.data_type != Type::Code {
