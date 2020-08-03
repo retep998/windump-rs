@@ -1,12 +1,15 @@
 [package]
-
 name = "windump"
 version = "0.0.1"
 authors = ["Peter Atashian <retep998@gmail.com>"]
+edition = "2018"
 
 [dependencies]
-regex = "0.2"
-walkdir = "1"
+chrono = "0.4"
+regex = "1"
+reqwest = { version = "0.10", features = ["blocking"] }
+serde_json = "1"
+walkdir = "2"
 
 [profile.release]
 debug = true

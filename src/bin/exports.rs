@@ -1,13 +1,12 @@
-
 extern crate regex;
 
-use regex::{Regex};
-use std::collections::{HashMap};
+use regex::Regex;
+use std::collections::HashMap;
 use std::env::args;
-use std::fs::{File, read_dir};
+use std::fs::{read_dir, File};
 use std::io::{BufWriter, Write};
-use std::path::{Path};
-use std::process::{Command};
+use std::path::Path;
+use std::process::Command;
 use std::str::FromStr;
 
 //Fields:
@@ -24,13 +23,13 @@ use std::str::FromStr;
 //Type = code|data|const
 //Version = 0
 
-pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Tools\MSVC\14.12.25827\bin\Hostx64\x64\dumpbin.exe";
-pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.16299.0\um";
-pub const WINBASE: &'static str = r"C:\Users\Peter\Code\winapi-rs";
+pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\bin\Hostx64\x64\dumpbin.exe";
+pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um";
+pub const WINBASE: &'static str = r"E:\Code\winapi-rs";
 pub const DLLTOOL64: &'static str = r"D:\Software\mingw64\x86_64-w64-mingw32\bin\dlltool.exe";
 pub const DLLTOOL32: &'static str = r"D:\Software\mingw32\i686-w64-mingw32\bin\dlltool.exe";
-pub const SDK64: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.16299.0\um\x64";
-pub const SDK32: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.16299.0\um\x86";
+pub const SDK64: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um\x64";
+pub const SDK32: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um\x86";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Machine {
@@ -111,31 +110,40 @@ struct Export {
     data_type: Type,
 }
 impl Export {
-    fn write<T>(&self, fout: &mut T, arch: Machine) where T: Write {
+    fn write<T>(&self, fout: &mut T, arch: Machine)
+    where
+        T: Write,
+    {
         match self.name_type {
             NameType::Undecorate | NameType::NoPrefix => {
                 let symbol = sanitize(&self.symbol_name, arch);
                 writeln!(fout, "{}", symbol).unwrap();
-            },
+            }
             NameType::Name => {
                 writeln!(fout, "{}", self.symbol_name).unwrap();
-            },
+            }
             NameType::Ordinal => {
                 let symbol = sanitize(&self.symbol_name, arch);
                 writeln!(fout, "{} @{}", symbol, self.ordinal.unwrap()).unwrap();
-            },
+            }
         }
     }
 }
 fn export(name: &str, arch: Machine) {
     println!("Working on {}", name);
-    let plibmsvc = Path::new(SDKBASE).join(arch.msvc()).join(format!("{}.lib", name));
+    let plibmsvc = Path::new(SDKBASE)
+        .join(arch.msvc())
+        .join(format!("{}.lib", name));
     if !plibmsvc.exists() {
         println!("Library does not exist!");
-        return
+        return;
     }
     let reg = Regex::new("^  ([a-zA-Z][a-zA-Z ]*?) *: (.*)$").unwrap();
-    let cin = Command::new(DUMPBIN).arg("/HEADERS").arg(&plibmsvc).output().unwrap();
+    let cin = Command::new(DUMPBIN)
+        .arg("/HEADERS")
+        .arg(&plibmsvc)
+        .output()
+        .unwrap();
     let input = String::from_utf8_lossy(&cin.stdout);
     let mut next: HashMap<String, String> = HashMap::new();
     let mut exports: Vec<Export> = Vec::new();
@@ -167,13 +175,16 @@ fn export(name: &str, arch: Machine) {
     for export in exports {
         if export.data_type != Type::Code {
             // println!("Skipping non-code {:?}", export);
-            continue
+            continue;
         }
         if export.symbol_name.contains("@@") {
             // println!("Skipping C++ {:?}", export.symbol_name);
-            continue
+            continue;
         }
-        dll_exports.entry(export.dll.clone()).or_insert_with(|| Vec::new()).push(export);
+        dll_exports
+            .entry(export.dll.clone())
+            .or_insert_with(|| Vec::new())
+            .push(export);
     }
     for (_, exports) in &mut dll_exports {
         exports.sort_by(|a, b| a.name.cmp(&b.name));
@@ -183,11 +194,17 @@ fn export(name: &str, arch: Machine) {
         Machine::X86 => DLLTOOL32,
     };
     if dll_exports.len() == 0 {
-        return
+        return;
     } else if dll_exports.len() == 1 {
         let (dll, exports) = dll_exports.into_iter().next().unwrap();
-        let pdef = Path::new(WINBASE).join(arch.rust()).join("def").join(format!("{}.def", name));
-        let plibgnu = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("libwinapi_{}.a", name));
+        let pdef = Path::new(WINBASE)
+            .join(arch.rust())
+            .join("def")
+            .join(format!("{}.def", name));
+        let plibgnu = Path::new(WINBASE)
+            .join(arch.rust())
+            .join("lib")
+            .join(format!("libwinapi_{}.a", name));
         println!("{}", pdef.display());
         let mut fout = BufWriter::new(File::create(&pdef).unwrap());
         writeln!(&mut fout, "LIBRARY {}", dll).unwrap();
@@ -197,17 +214,35 @@ fn export(name: &str, arch: Machine) {
         }
         drop(fout);
         Command::new(dlltool)
-            .arg("-d").arg(&pdef)
-            .arg("-l").arg(&plibgnu)
-            .arg("-k").output().unwrap();
+            .arg("-d")
+            .arg(&pdef)
+            .arg("-l")
+            .arg(&plibgnu)
+            .arg("-k")
+            .output()
+            .unwrap();
     } else {
-        let plib = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("libwinapi_{}.a", name));
+        let plib = Path::new(WINBASE)
+            .join(arch.rust())
+            .join("lib")
+            .join(format!("libwinapi_{}.a", name));
         let mut flib = BufWriter::new(File::create(&plib).unwrap());
         writeln!(&mut flib, "INPUT(").unwrap();
         for (dll, exports) in dll_exports {
-            let stem = Path::new(&dll).file_stem().unwrap().to_str().unwrap().to_lowercase();
-            let pdef = Path::new(WINBASE).join(arch.rust()).join("def").join(format!("{}-{}.def", name, stem));
-            let psublib = Path::new(WINBASE).join(arch.rust()).join("lib").join(format!("libwinapi_{}-{}.a", name, stem));
+            let stem = Path::new(&dll)
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_lowercase();
+            let pdef = Path::new(WINBASE)
+                .join(arch.rust())
+                .join("def")
+                .join(format!("{}-{}.def", name, stem));
+            let psublib = Path::new(WINBASE)
+                .join(arch.rust())
+                .join("lib")
+                .join(format!("libwinapi_{}-{}.a", name, stem));
             let mut fout = BufWriter::new(File::create(&pdef).unwrap());
             writeln!(&mut fout, "LIBRARY {}", dll).unwrap();
             writeln!(&mut fout, "EXPORTS").unwrap();
@@ -217,36 +252,58 @@ fn export(name: &str, arch: Machine) {
             writeln!(&mut flib, "libwinapi_{}-{}.a", name, stem).unwrap();
             drop(fout);
             Command::new(dlltool)
-                .arg("-d").arg(&pdef)
-                .arg("-l").arg(&psublib)
-                .arg("-k").output().unwrap();
+                .arg("-d")
+                .arg(&pdef)
+                .arg("-l")
+                .arg(&psublib)
+                .arg("-k")
+                .output()
+                .unwrap();
         }
         writeln!(&mut flib, ")").unwrap();
     }
 }
 fn sanitize(symbol: &str, arch: Machine) -> &str {
-    if arch != Machine::X86 { symbol }
-    else if &symbol[0..1] == "_" { &symbol[1..] }
-    else { symbol }
+    if arch != Machine::X86 {
+        symbol
+    } else if &symbol[0..1] == "_" {
+        &symbol[1..]
+    } else {
+        symbol
+    }
 }
 fn main() {
     let args = args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
         for entry in read_dir(SDK64).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().and_then(|x| x.to_str())
-                .map(|x| x.to_lowercase() != "lib").unwrap_or(true) {
+            if path
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| x.to_lowercase() != "lib")
+                .unwrap_or(true)
+            {
                 continue;
             }
-            export(&path.file_stem().unwrap().to_str().unwrap().to_lowercase(), Machine::X64);
+            export(
+                &path.file_stem().unwrap().to_str().unwrap().to_lowercase(),
+                Machine::X64,
+            );
         }
         for entry in read_dir(SDK32).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().and_then(|x| x.to_str())
-                .map(|x| x.to_lowercase() != "lib").unwrap_or(true) {
+            if path
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| x.to_lowercase() != "lib")
+                .unwrap_or(true)
+            {
                 continue;
             }
-            export(&path.file_stem().unwrap().to_str().unwrap().to_lowercase(), Machine::X86);
+            export(
+                &path.file_stem().unwrap().to_str().unwrap().to_lowercase(),
+                Machine::X86,
+            );
         }
     } else {
         for arg in args {
