@@ -3,10 +3,10 @@ extern crate regex;
 use regex::Regex;
 use std::collections::HashMap;
 use std::env::args;
-use std::fs::{read_dir, File};
-use std::io::{BufWriter, Write};
+use std::fs::{read_dir, remove_file, File};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 
 //Fields:
@@ -26,6 +26,8 @@ use std::str::FromStr;
 pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\bin\Hostx64\x64\dumpbin.exe";
 pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um";
 pub const WINBASE: &'static str = r"E:\Code\winapi-rs";
+pub const AR64: &'static str = r"D:\Software\mingw64\x86_64-w64-mingw32\bin\ar.exe";
+pub const AR32: &'static str = r"D:\Software\mingw32\i686-w64-mingw32\ar.exe";
 pub const DLLTOOL64: &'static str = r"D:\Software\mingw64\x86_64-w64-mingw32\bin\dlltool.exe";
 pub const DLLTOOL32: &'static str = r"D:\Software\mingw32\i686-w64-mingw32\bin\dlltool.exe";
 pub const SDK64: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um\x64";
@@ -222,12 +224,10 @@ fn export(name: &str, arch: Machine) {
             .output()
             .unwrap();
     } else {
-        let plib = Path::new(WINBASE)
-            .join(arch.rust())
-            .join("lib")
-            .join(format!("libwinapi_{}.a", name));
-        let mut flib = BufWriter::new(File::create(&plib).unwrap());
-        writeln!(&mut flib, "INPUT(").unwrap();
+        let path = Path::new(WINBASE).join(arch.rust()).join("lib");
+        let mut merged_libs = Vec::new();
+        let mut mri_script = Vec::new();
+        writeln!(&mut mri_script, "CREATE libwinapi_{}.a", name).unwrap();
         for (dll, exports) in dll_exports {
             let stem = Path::new(&dll)
                 .file_stem()
@@ -249,8 +249,9 @@ fn export(name: &str, arch: Machine) {
             for export in exports {
                 export.write(&mut fout, arch);
             }
-            writeln!(&mut flib, "libwinapi_{}-{}.a", name, stem).unwrap();
+            writeln!(&mut mri_script, "ADDLIB libwinapi_{}-{}.a", name, stem).unwrap();
             drop(fout);
+            merged_libs.push(psublib.clone());
             Command::new(dlltool)
                 .arg("-d")
                 .arg(&pdef)
@@ -260,7 +261,37 @@ fn export(name: &str, arch: Machine) {
                 .output()
                 .unwrap();
         }
-        writeln!(&mut flib, ")").unwrap();
+        writeln!(&mut mri_script, "SAVE").unwrap();
+        writeln!(&mut mri_script, "END").unwrap();
+        let ar = match arch {
+            Machine::X64 => AR64,
+            Machine::X86 => AR32,
+        };
+        let mut child = Command::new(ar)
+            .arg("-M")
+            .current_dir(path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .ok()
+            .expect("failed to spawn process");
+
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(&mri_script)
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        if !output.status.success() {
+            io::stdout().write_all(&output.stdout).unwrap();
+            io::stderr().write_all(&output.stderr).unwrap();
+        }
+        merged_libs.sort();
+        merged_libs.dedup();
+        for file in merged_libs {
+            remove_file(file).unwrap();
+        }
     }
 }
 fn sanitize(symbol: &str, arch: Machine) -> &str {
