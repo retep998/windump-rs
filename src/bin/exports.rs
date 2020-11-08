@@ -23,15 +23,15 @@ use std::str::FromStr;
 //Type = code|data|const
 //Version = 0
 
-pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.25.28610\bin\Hostx64\x64\dumpbin.exe";
-pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um";
+pub const DUMPBIN: &'static str = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\Hostx64\x64\dumpbin.exe";
+pub const SDKBASE: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um";
 pub const WINBASE: &'static str = r"E:\Code\winapi-rs";
 pub const AR64: &'static str = r"D:\Software\mingw64\x86_64-w64-mingw32\bin\ar.exe";
 pub const AR32: &'static str = r"D:\Software\mingw32\i686-w64-mingw32\ar.exe";
 pub const DLLTOOL64: &'static str = r"D:\Software\mingw64\x86_64-w64-mingw32\bin\dlltool.exe";
 pub const DLLTOOL32: &'static str = r"D:\Software\mingw32\i686-w64-mingw32\bin\dlltool.exe";
-pub const SDK64: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um\x64";
-pub const SDK32: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.18362.0\um\x86";
+pub const SDK64: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x64";
+pub const SDK32: &'static str = r"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x86";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Machine {
